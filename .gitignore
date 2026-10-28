@@ -1,3 +1,29 @@
+# Data and generated outputs
 data/
-.cache/
 figures/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# MATLAB
+*.asv
+*.m~
+*.mex*
+slprj/
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Claude Code local files
+.claude/settings.local.json
+.claude/worktrees/

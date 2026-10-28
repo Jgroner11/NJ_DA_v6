@@ -1,12 +1,15 @@
 %% Export one session's binned spikes for umap_plots.py
 % Bins every spike of the session, smooths each unit with a Gaussian along
 % time, z-scores it, and saves the result with the bin times, the port each
-% bin is at and its trial's reward, correctness, valuable patch and specific
-% valuable patch labels to data/<session>/binned.mat -- the only file the
-% Python side reads.
+% bin is at, whether that is its own trial's port, and its trial's reward,
+% correctness, valuable patch and specific valuable patch labels to
+% data/<session>/binned.mat -- the only file the Python side reads.
 % Run from the project root.
 
-data_file = 'reduced_np_data_17_05_2026.mat';
+% pipeline.py sets data_file before running this; run by hand, it is this one
+if ~exist('data_file', 'var')
+    data_file = 'reduced_np_data_17_05_2026.mat';
+end
 bin_size_ms = 100;
 sigma_bins = 2;            % Gaussian width in bins
 
@@ -120,6 +123,13 @@ port_per_bin(isnan(nearest_px) | nearest_px >= port_threshold_px) = 0;
 port_per_bin = uint8(port_per_bin');
 fprintf('%d of %d bins within %g px of a port\n', ...
     sum(port_per_bin > 0), n_bins, port_threshold_px);
+
+% 1 where the mouse is at its own trial's port -- the one the trial ended at
+% -- and 0 elsewhere, gaps between trials included. Passing another port on
+% the way does not count.
+at_trial_port = zeros(1, n_bins, 'uint8');
+at_trial_port(in_trial) = port_per_bin(in_trial) == trials.Port(trial_per_bin(in_trial))';
+fprintf('%d of %d bins at their own trial''s port\n', sum(at_trial_port), n_bins);
 
 %% Reward label per bin
 % One code per trial, carried to every bin of that trial, 0 between trials:
@@ -242,5 +252,5 @@ if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', ...
+save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', ...
     'bin_size_ms', 'sigma_bins', '-v7');
