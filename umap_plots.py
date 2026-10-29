@@ -30,12 +30,15 @@ folder holds:
     umap_all.html                   every plot above as a subplot, each with its
                                     own legend
 
-and a third folder, transition/, holds one plot on its own, labelled on every
-bin of the trial:
+and a third folder, transition/, holds three plots on their own, each
+coloured by how each trial's reward changed from the previous trial's (up in
+greens, down in purples and orange, unchanged pale), labelled only on the bins
+within a window around the trial's reward time:
 
-    umap_transition.html            coloured by how each trial's reward changed
-                                    from the previous trial's: up in greens,
-                                    down in purples and orange, unchanged pale
+    umap_transition_-3_0.html       3 s before reward up to it
+    umap_transition_0_2.html        from reward to 2 s after it
+    umap_transition_-3_2.html       3 s before reward to 2 s after it
+    umap_transition_all.html        the three above as subplots side by side
 
 Run from the project root, after export_bins.m:
 
@@ -128,6 +131,9 @@ SPECIFIC_NAMES = ([f'patch {p}, post discovery' for p in range(1, 5)]
 TRANSITION_COLOURS = ['#1B7837', '#5AAE61', '#A6DBA0', '#762A83', '#F28E2B', '#C2A5CF']
 TRANSITION_NAMES = ['unrewarded -> 30 ms', 'unrewarded -> 15 ms', '15 ms -> 30 ms',
                     '30 ms -> unrewarded', '15 ms -> unrewarded', '30 ms -> 15 ms']
+# (start, end) seconds from each trial's reward time, one transition plot each
+TRANSITION_WINDOWS = [(-3, 0), (0, 2), (-3, 2)]
+TRANSITION_COMBINED_WIDTH, TRANSITION_COMBINED_HEIGHT = 1800, 800   # umap_transition_all's PNG
 
 
 def fit_key(spikes):
@@ -212,17 +218,17 @@ def apply_layout(figure, title):
     return figure
 
 
-def combined_figure(labelings, title):
-    """Every labeling's figure as one subplot each, COMBINED_COLS to a row.
+def combined_figure(labelings, title, cols=COMBINED_COLS):
+    """Every labeling's figure as one subplot each, cols to a row.
 
     Each subplot keeps its own legend (or colorbar), so a legend entry only
     toggles the points of its own subplot. The 3D scene takes the top of its
     cell and the legend sits in the strip below it, so it never covers points.
     """
-    n_rows = -(-len(labelings) // COMBINED_COLS)
-    specs = [[{'type': 'scene'} if r * COMBINED_COLS + c < len(labelings) else None
-              for c in range(COMBINED_COLS)] for r in range(n_rows)]
-    combined = make_subplots(rows=n_rows, cols=COMBINED_COLS, specs=specs,
+    n_rows = -(-len(labelings) // cols)
+    specs = [[{'type': 'scene'} if r * cols + c < len(labelings) else None
+              for c in range(cols)] for r in range(n_rows)]
+    combined = make_subplots(rows=n_rows, cols=cols, specs=specs,
                              subplot_titles=[label for label, _ in labelings.values()],
                              horizontal_spacing=0.01, vertical_spacing=0.04)
 
@@ -230,8 +236,7 @@ def combined_figure(labelings, title):
     for i, (_, figure) in enumerate(labelings.values()):
         scene = 'scene' if i == 0 else f'scene{i + 1}'
         legend = 'legend' if i == 0 else f'legend{i + 1}'
-        combined.add_traces(list(figure.data), rows=i // COMBINED_COLS + 1,
-                            cols=i % COMBINED_COLS + 1)
+        combined.add_traces(list(figure.data), rows=i // cols + 1, cols=i % cols + 1)
         (x0, x1), (y0, y1) = combined.layout[scene].domain.x, combined.layout[scene].domain.y
         scene_y0 = y0 + LEGEND_STRIP * (y1 - y0)      # the scene's bottom edge, above the strip
         combined.layout[scene].update(domain=dict(x=[x0, x1], y=[scene_y0, y1]),
@@ -335,14 +340,31 @@ def main():
         save(combined, out_dir / 'umap_all.html', COMBINED_WIDTH, COMBINED_HEIGHT,
              args.skip_created)
 
-    transitions = binned['transition_per_bin'].ravel().astype(int)
-    figure = category_figure(
-        points, transitions, TRANSITION_COLOURS, TRANSITION_NAMES,
-        'between trials, same reward as previous, or no previous trial')
-    apply_layout(figure, f'{session}: full UMAP by reward transition, whole trial ({settings})')
+    # one plot per window, coloured only on the bins that far from their own
+    # trial's reward time
+    to_reward = binned['time_to_trial_reward'].ravel()
+    trial_transitions = binned['transition_per_bin'].ravel().astype(int)
     out_dir = Path('figures') / session / 'transition'
     out_dir.mkdir(parents=True, exist_ok=True)
-    save(figure, out_dir / 'umap_transition.html', PNG_WIDTH, PNG_HEIGHT, args.skip_created)
+    windows = {}
+    for start, end in TRANSITION_WINDOWS:
+        in_window = (to_reward >= start) & (to_reward <= end)       # NaN compares False
+        transitions = np.where(in_window, trial_transitions, 0)
+        figure = category_figure(
+            points, transitions, TRANSITION_COLOURS, TRANSITION_NAMES,
+            f'outside {start:g} to {end:g} s of reward, same reward as previous, '
+            'or no previous trial')
+        apply_layout(figure, f'{session}: full UMAP by reward transition, '
+                             f'{start:g} to {end:g} s of reward ({settings})')
+        save(figure, out_dir / f'umap_transition_{start:g}_{end:g}.html',
+             PNG_WIDTH, PNG_HEIGHT, args.skip_created)
+        windows[f'{start:g}_{end:g}'] = (f'{start:g} to {end:g} s of reward', figure)
+
+    combined = combined_figure(
+        windows, f'{session}: full UMAP by reward transition, by window ({settings})',
+        cols=len(windows))
+    save(combined, out_dir / 'umap_transition_all.html',
+         TRANSITION_COMBINED_WIDTH, TRANSITION_COMBINED_HEIGHT, args.skip_created)
 
 
 if __name__ == '__main__':

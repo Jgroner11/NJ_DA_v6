@@ -277,11 +277,17 @@ fprintf('transition trials: %s for codes 1-6, %d unlabelled\n', ...
 transition_per_bin = zeros(1, n_bins, 'uint8');
 transition_per_bin(in_trial) = transition_per_trial(trial_per_bin(in_trial));
 
+% seconds from each bin to its own trial's reward time -- when the reward came,
+% or would have, for an unrewarded trial -- negative before it, NaN between
+% trials, so the Python side can keep only the bins leading up to it
+time_to_trial_reward = nan(1, n_bins);
+time_to_trial_reward(in_trial) = bin_times_sec(in_trial) - reward_time(trial_per_bin(in_trial))';
+
 %% Save
 out_dir = fullfile('data', session);
 if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', ...
+save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', ...
     'bin_size_ms', 'sigma_bins', '-v7');
