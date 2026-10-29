@@ -2,7 +2,8 @@
 % Bins every spike of the session, smooths each unit with a Gaussian along
 % time, z-scores it, and saves the result with the bin times, the port each
 % bin is at, whether that is its own trial's port, and its trial's reward,
-% correctness, valuable patch and specific valuable patch labels to
+% correctness, valuable patch, specific valuable patch and reward transition
+% labels to
 % data/<session>/binned.mat -- the only file the Python side reads.
 % Run from the project root.
 
@@ -246,11 +247,41 @@ fprintf('specific valuable patch trials, post by patch: %s, perseveration by pat
 specific_per_bin = zeros(1, n_bins, 'uint8');
 specific_per_bin(in_trial) = specific_per_trial(trial_per_bin(in_trial));
 
+%% Reward transition label per bin
+% One code per trial, carried to every bin of that trial, 0 between trials,
+% for the first trial, for a trial after a gap left by trial selection, and
+% where the reward is the same as the previous trial's. Where the previous
+% trial was does not matter. Reward goes up:
+%   1  unrewarded -> 30 ms
+%   2  unrewarded -> 15 ms
+%   3  15 ms -> 30 ms
+% Reward goes down:
+%   4  30 ms -> unrewarded
+%   5  15 ms -> unrewarded
+%   6  30 ms -> 15 ms
+outcome = 3 * ones(n_trials, 1);         % 1 is 30 ms, 2 is 15 ms, 3 is unrewarded
+outcome(is_rewarded & reward_ms == 30) = 1;
+outcome(is_rewarded & reward_ms == 15) = 2;
+% transition_code(previous outcome, current outcome)
+transition_code = [0 6 4
+                   3 0 5
+                   1 2 0];
+has_prev = [false; diff(trials.SessionTrial) == 1];
+
+transition_per_trial = zeros(n_trials, 1);
+transition_per_trial(has_prev) = transition_code(sub2ind(size(transition_code), ...
+    outcome(find(has_prev) - 1), outcome(has_prev)));
+fprintf('transition trials: %s for codes 1-6, %d unlabelled\n', ...
+    mat2str(histcounts(transition_per_trial, 0.5:1:6.5)), sum(transition_per_trial == 0));
+
+transition_per_bin = zeros(1, n_bins, 'uint8');
+transition_per_bin(in_trial) = transition_per_trial(trial_per_bin(in_trial));
+
 %% Save
 out_dir = fullfile('data', session);
 if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', ...
+save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', ...
     'bin_size_ms', 'sigma_bins', '-v7');

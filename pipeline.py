@@ -1,13 +1,16 @@
 """Run export_bins.m and then umap_plots.py for every session, one at a time.
 
     python pipeline.py
+    python pipeline.py --skip_created
 
 Run from the project root, with the conda env active so umap_plots.py runs
 under this same interpreter. Each session gets its own MATLAB process, told
 which .mat file to export through data_file. The first step to fail stops the
-whole run.
+whole run. --skip_created is passed on to umap_plots.py, which then leaves
+figures that already exist as they are; the export still runs every time.
 """
 
+import argparse
 import subprocess
 import sys
 import time
@@ -33,13 +36,19 @@ def run(command):
 
 
 def main():
+    parser = argparse.ArgumentParser(description='Export and plot every session.')
+    parser.add_argument('--skip_created', action='store_true',
+                        help='leave figures that already exist untouched')
+    args = parser.parse_args()
+    plot_flags = ['--skip_created'] if args.skip_created else []
+
     for data_file in SESSIONS:
         session = Path(data_file).stem
         print(f'\n=== {session} ===')
         print('export_bins.m')
         run(['matlab', '-batch', f"data_file = '{data_file}'; export_bins"])
         print('umap_plots.py')
-        run([sys.executable, 'umap_plots.py', session])
+        run([sys.executable, 'umap_plots.py', session, *plot_flags])
 
 
 if __name__ == '__main__':

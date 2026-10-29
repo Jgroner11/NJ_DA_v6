@@ -30,10 +30,21 @@ folder holds:
     umap_all.html                   every plot above as a subplot, each with its
                                     own legend
 
+and a third folder, transition/, holds one plot on its own, labelled on every
+bin of the trial:
+
+    umap_transition.html            coloured by how each trial's reward changed
+                                    from the previous trial's: up in greens,
+                                    down in purples and orange, unchanged pale
+
 Run from the project root, after export_bins.m:
 
     python umap_plots.py
     python umap_plots.py reduced_np_data_25_05_2026
+    python umap_plots.py reduced_np_data_25_05_2026 --skip_created
+
+--skip_created leaves any figure whose HTML and PNG both already exist as it
+is, so only new or missing plots are written.
 
 Fits are cached by content in .cache/, as in v5: the key covers the spike
 matrix and every UMAP parameter, so a change to the binning or an edited
@@ -42,8 +53,8 @@ UMAP is not seeded, so the cache is also what keeps the embedding stable from
 run to run -- delete .cache/umap_*.joblib to force a fresh fit.
 """
 
+import argparse
 import hashlib
-import sys
 from pathlib import Path
 
 import joblib
@@ -110,6 +121,13 @@ def tint(colour, amount=0.5):
 SPECIFIC_COLOURS = PATCH_COLOURS + [tint(c) for c in PATCH_COLOURS]
 SPECIFIC_NAMES = ([f'patch {p}, post discovery' for p in range(1, 5)]
                   + [f'patch {p}, perseveration' for p in range(1, 5)])
+
+
+# transition_per_bin codes 1-6, as export_bins.m defines them: 1-3 the reward
+# goes up, 4-6 it goes down
+TRANSITION_COLOURS = ['#1B7837', '#5AAE61', '#A6DBA0', '#762A83', '#F28E2B', '#C2A5CF']
+TRANSITION_NAMES = ['unrewarded -> 30 ms', 'unrewarded -> 15 ms', '15 ms -> 30 ms',
+                    '30 ms -> unrewarded', '15 ms -> unrewarded', '30 ms -> 15 ms']
 
 
 def fit_key(spikes):
@@ -237,8 +255,26 @@ def combined_figure(labelings, title):
     return combined
 
 
+def save(figure, out, width, height, skip_created):
+    """Write figure to out as HTML, with a PNG of its starting view beside it,
+    rendered by kaleido -- unless skip_created and both files already exist."""
+    png = out.with_suffix('.png')
+    if skip_created and out.exists() and png.exists():
+        print(f'skipped {out}, already created')
+        return
+    figure.write_html(out)
+    figure.write_image(png, width=width, height=height, scale=PNG_SCALE)
+    print(f'wrote {out} and .png')
+
+
 def main():
-    session = sys.argv[1] if len(sys.argv) > 1 else SESSION
+    parser = argparse.ArgumentParser(description='Plot one session\'s full UMAP under each labeling.')
+    parser.add_argument('session', nargs='?', default=SESSION,
+                        help="the session's .mat file stem, as export_bins.m names it")
+    parser.add_argument('--skip_created', action='store_true',
+                        help='leave figures whose HTML and PNG both already exist untouched')
+    args = parser.parse_args()
+    session = args.session
     binned_path = Path('data') / session / 'binned.mat'
     if not binned_path.exists():
         raise SystemExit(f'{binned_path} not found, run export_bins.m first')
@@ -292,20 +328,21 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, (label, figure) in labelings.items():
             apply_layout(figure, f'{session}: full UMAP by {label} ({settings})')
-            out = out_dir / f'umap_{name}.html'
-            figure.write_html(out)
-            # the PNG is the plot's starting view, rendered by kaleido
-            figure.write_image(out.with_suffix('.png'), width=PNG_WIDTH, height=PNG_HEIGHT,
-                               scale=PNG_SCALE)
-            print(f'wrote {out} and .png')
+            save(figure, out_dir / f'umap_{name}.html', PNG_WIDTH, PNG_HEIGHT, args.skip_created)
 
         combined = combined_figure(
             labelings, f'{session}: full UMAP by every labeling, trial labels {scope} ({settings})')
-        out = out_dir / 'umap_all.html'
-        combined.write_html(out)
-        combined.write_image(out.with_suffix('.png'), width=COMBINED_WIDTH,
-                             height=COMBINED_HEIGHT, scale=PNG_SCALE)
-        print(f'wrote {out} and .png')
+        save(combined, out_dir / 'umap_all.html', COMBINED_WIDTH, COMBINED_HEIGHT,
+             args.skip_created)
+
+    transitions = binned['transition_per_bin'].ravel().astype(int)
+    figure = category_figure(
+        points, transitions, TRANSITION_COLOURS, TRANSITION_NAMES,
+        'between trials, same reward as previous, or no previous trial')
+    apply_layout(figure, f'{session}: full UMAP by reward transition, whole trial ({settings})')
+    out_dir = Path('figures') / session / 'transition'
+    out_dir.mkdir(parents=True, exist_ok=True)
+    save(figure, out_dir / 'umap_transition.html', PNG_WIDTH, PNG_HEIGHT, args.skip_created)
 
 
 if __name__ == '__main__':
