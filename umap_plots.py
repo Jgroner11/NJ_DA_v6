@@ -136,10 +136,11 @@ TRANSITION_WINDOWS = [(-3, 0), (0, 2), (-3, 2)]
 TRANSITION_COMBINED_WIDTH, TRANSITION_COMBINED_HEIGHT = 1800, 800   # umap_transition_all's PNG
 
 
-def fit_key(spikes):
-    """The cache key: the spike matrix's contents plus every UMAP parameter."""
+def fit_key(spikes, selection='full'):
+    """The cache key: the rows' contents, the selection they were taken as
+    ('full' for every bin), plus every UMAP parameter."""
     digest = hashlib.sha256(np.ascontiguousarray(spikes).tobytes()).hexdigest()
-    source = digest + repr(spikes.shape) + 'full' + repr(sorted(UMAP_PARAMS.items()))
+    source = digest + repr(spikes.shape) + selection + repr(sorted(UMAP_PARAMS.items()))
     return hashlib.sha256(source.encode()).hexdigest()[:16]
 
 

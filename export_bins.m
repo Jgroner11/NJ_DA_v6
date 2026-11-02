@@ -283,11 +283,24 @@ transition_per_bin(in_trial) = transition_per_trial(trial_per_bin(in_trial));
 time_to_trial_reward = nan(1, n_bins);
 time_to_trial_reward(in_trial) = bin_times_sec(in_trial) - reward_time(trial_per_bin(in_trial))';
 
+%% Trial patch per bin
+% The patch (1-4) of the port each bin's trial ended at, carried to every bin
+% of that trial wherever the mouse is, 0 between trials. Selects the bins of
+% each patch's own UMAP, as v5's patch_id did.
+trial_patch_per_bin = zeros(1, n_bins, 'uint8');
+trial_patch_per_bin(in_trial) = port_patch(trial_per_bin(in_trial));
+
+%% Trial number per bin
+% The SessionTrial of each bin's trial -- its number in the whole session,
+% gaps left by trial selection included -- 0 between trials.
+trial_number_per_bin = zeros(1, n_bins);
+trial_number_per_bin(in_trial) = trials.SessionTrial(trial_per_bin(in_trial));
+
 %% Save
 out_dir = fullfile('data', session);
 if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', ...
+save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_number_per_bin', ...
     'bin_size_ms', 'sigma_bins', '-v7');

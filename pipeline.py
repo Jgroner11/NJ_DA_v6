@@ -1,5 +1,5 @@
-"""Run export_bins.m, umap_plots.py and distance_on_maze.py for every session,
-one at a time.
+"""Run export_bins.m, umap_plots.py, distance_on_maze.py, patch_umaps.py and
+alternate_embeddings.py for every session, one at a time.
 
     python pipeline.py
     python pipeline.py --skip_created
@@ -7,7 +7,7 @@ one at a time.
 Run from the project root, with the conda env active so umap_plots.py runs
 under this same interpreter. Each session gets its own MATLAB process, told
 which .mat file to export through data_file. The first step to fail stops the
-whole run. --skip_created is passed on to both plotting scripts, which then leave
+whole run. --skip_created is passed on to every plotting script, which then leaves
 figures that already exist as they are; the export still runs every time.
 """
 
@@ -52,6 +52,10 @@ def main():
         run([sys.executable, 'umap_plots.py', session, *plot_flags])
         print('distance_on_maze.py')
         run([sys.executable, 'distance_on_maze.py', session, *plot_flags])
+        print('patch_umaps.py')
+        run([sys.executable, 'patch_umaps.py', session, *plot_flags])
+        print('alternate_embeddings.py')
+        run([sys.executable, 'alternate_embeddings.py', session, *plot_flags])
 
 
 if __name__ == '__main__':
