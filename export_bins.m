@@ -1,6 +1,6 @@
 %% Export one session's binned spikes for umap_plots.py
 % Bins every spike of the session, smooths each unit with a Gaussian along
-% time, z-scores it, and saves the result with the bin times, the head
+% time, z-scores it, and saves the result with each row's cluster id, the bin times, the head
 % position and port each bin is at, whether that is its own trial's port, and
 % its trial's reward, correctness, valuable patch, specific valuable patch and
 % reward transition labels to data/<session>/binned.mat -- the only file the
@@ -70,6 +70,7 @@ usable = all(isfinite(spikes), 2);
 fprintf('%s: %d units (%d dropped for no variance), %d bins of %d ms\n', ...
     session, sum(usable), sum(~usable), n_bins, bin_size_ms);
 spikes = single(spikes(usable, :));
+unit_ids = units.cluster_id(usable)';    % the cluster each row of spikes comes from
 
 %% Head position per bin
 % Video frames go onto the session clock like the spikes: trial start plus the
@@ -290,11 +291,23 @@ time_to_trial_reward(in_trial) = bin_times_sec(in_trial) - reward_time(trial_per
 trial_patch_per_bin = zeros(1, n_bins, 'uint8');
 trial_patch_per_bin(in_trial) = port_patch(trial_per_bin(in_trial));
 
-%% Trial number per bin
-% The SessionTrial of each bin's trial -- its number in the whole session,
-% gaps left by trial selection included -- 0 between trials.
-trial_number_per_bin = zeros(1, n_bins);
-trial_number_per_bin(in_trial) = trials.SessionTrial(trial_per_bin(in_trial));
+%% Trial number since discovery per bin
+% Each post discovery trial's place among its block's post discovery trials,
+% correct or not: 1 is the first trial after the block's third correct
+% rewarded one. Carried to every bin of that trial; 0 for pre discovery
+% trials and between trials. Counts the trials in the data, so a trial left
+% out by trial selection is not counted.
+trial_since_discovery = zeros(n_trials, 1);
+for t = find(~is_pre)'
+    if t > 1 && block_per_trial(t) == block_per_trial(t - 1) && ~is_pre(t - 1)
+        trial_since_discovery(t) = trial_since_discovery(t - 1) + 1;
+    else
+        trial_since_discovery(t) = 1;
+    end
+end
+
+trial_since_discovery_per_bin = zeros(1, n_bins);
+trial_since_discovery_per_bin(in_trial) = trial_since_discovery(trial_per_bin(in_trial));
 
 %% Save
 out_dir = fullfile('data', session);
@@ -302,5 +315,5 @@ if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_number_per_bin', ...
+save(fullfile(out_dir, 'binned.mat'), 'spikes', 'unit_ids', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_since_discovery_per_bin', ...
     'bin_size_ms', 'sigma_bins', '-v7');

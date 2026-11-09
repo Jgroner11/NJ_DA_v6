@@ -27,6 +27,11 @@ folder holds:
     umap_specific_valuable_patch.html  post discovery trials by their block's
                                     correct patch, and perseveration trials by
                                     the previous block's, in a lighter tint
+    umap_specific_valuable_patch_post.html  post discovery trials only, by their
+                                    block's correct patch: correct ones in the
+                                    patch colour, exploration that returns in
+                                    its lighter tint; perseveration and
+                                    exploration without return pale
     umap_all.html                   every plot above as a subplot, each with its
                                     own legend
 
@@ -124,6 +129,20 @@ def tint(colour, amount=0.5):
 SPECIFIC_COLOURS = PATCH_COLOURS + [tint(c) for c in PATCH_COLOURS]
 SPECIFIC_NAMES = ([f'patch {p}, post discovery' for p in range(1, 5)]
                   + [f'patch {p}, perseveration' for p in range(1, 5)])
+
+
+# post discovery only, codes from post_codes: 1-4 correct in a block whose
+# correct patch is P, 5-8 exploration with return in such a block, in a tint
+POST_COLOURS = SPECIFIC_COLOURS
+POST_NAMES = ([f'patch {p}, post discovery, correct' for p in range(1, 5)]
+              + [f'patch {p}, post discovery exploration, with return' for p in range(1, 5)])
+
+
+def post_codes(specific, valuable):
+    """POST_COLOURS codes per bin from the specific and valuable codes: the
+    block's patch for post discovery correct bins, 4 more for exploration
+    with return, 0 for everything else."""
+    return np.select([valuable == 3, valuable == 4], [specific, specific + 4], 0)
 
 
 # transition_per_bin codes 1-6, as export_bins.m defines them: 1-3 the reward
@@ -328,6 +347,9 @@ def main():
             'specific_valuable_patch': (f'specific valuable patch, {scope}', category_figure(
                 points, specific, SPECIFIC_COLOURS, SPECIFIC_NAMES,
                 f'{unlabelled}, or pre discovery not perseveration')),
+            'specific_valuable_patch_post': (f'specific valuable patch, post discovery only, {scope}',
+                category_figure(points, post_codes(specific, valuable), POST_COLOURS, POST_NAMES,
+                                f'{unlabelled}, pre discovery, or exploration without return')),
         }
 
         out_dir = Path('figures') / session / folder
