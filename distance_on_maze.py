@@ -37,7 +37,7 @@ MAZE_PNGS = {
     'reduced_np_data_25_05_2026': 'NPC4_2026_05_25_15_42_57_blackout.png',
 }
 
-MIN_DISTANCE = 4             # only distances at or above this are plotted
+MIN_DISTANCE = 2             # only distances at or above this are plotted
 COLOUR_SCALE = 'Plasma'      # dark blue-purple for the shortest kept jumps, bright yellow for the longest
 POINT_SIZE = 8
 

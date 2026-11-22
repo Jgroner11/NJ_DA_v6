@@ -3,8 +3,8 @@
 % time, z-scores it, and saves the result with each row's cluster id, the bin times, the head
 % position and port each bin is at, whether that is its own trial's port, and
 % its trial's reward, correctness, valuable patch, specific valuable patch and
-% reward transition labels to data/<session>/binned.mat -- the only file the
-% Python side reads.
+% reward transition labels, plus each trial's number, start and duration, to
+% data/<session>/binned.mat -- the only file the Python side reads.
 % Run from the project root.
 
 % pipeline.py sets data_file before running this; run by hand, it is this one
@@ -309,6 +309,14 @@ end
 trial_since_discovery_per_bin = zeros(1, n_bins);
 trial_since_discovery_per_bin(in_trial) = trial_since_discovery(trial_per_bin(in_trial));
 
+%% Per-trial timing
+% each selected trial's number, start on the session clock and duration, so
+% data keyed by trial and time in trial -- DataJoint's tracking -- can be put
+% on the bin clock the same way the frames are above
+trial_number = trials.SessionTrial(:)';
+trial_start_sec = trial_starts;
+trial_duration_sec = trial_durations(:)';
+
 %% Save
 out_dir = fullfile('data', session);
 if ~isfolder(out_dir)
@@ -316,4 +324,4 @@ if ~isfolder(out_dir)
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
 save(fullfile(out_dir, 'binned.mat'), 'spikes', 'unit_ids', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_since_discovery_per_bin', ...
-    'bin_size_ms', 'sigma_bins', '-v7');
+    'trial_number', 'trial_start_sec', 'trial_duration_sec', 'bin_size_ms', 'sigma_bins', '-v7');

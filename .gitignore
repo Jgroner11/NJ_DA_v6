@@ -27,3 +27,6 @@ desktop.ini
 # Claude Code local files
 .claude/settings.local.json
 .claude/worktrees/
+
+# DataJoint credentials
+datajoint.json

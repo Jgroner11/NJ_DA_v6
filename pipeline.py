@@ -1,5 +1,6 @@
-"""Run export_bins.m, umap_plots.py, distance_on_maze.py, patch_umaps.py and
-alternate_embeddings.py for every session, one at a time.
+"""Run export_bins.m, umap_plots.py, distance_on_maze.py, graph_occupancy.py,
+jumps_on_graph.py, patch_umaps.py and alternate_embeddings.py for every
+session, one at a time.
 
     python pipeline.py
     python pipeline.py --skip_created
@@ -9,6 +10,8 @@ under this same interpreter. Each session gets its own MATLAB process, told
 which .mat file to export through data_file. The first step to fail stops the
 whole run. --skip_created is passed on to every plotting script, which then leaves
 figures that already exist as they are; the export still runs every time.
+graph_occupancy.py and jumps_on_graph.py connect to DataJoint (datajoint.json)
+only for sessions whose NaviGraph tables are not yet cached in .cache/.
 """
 
 import argparse
@@ -52,6 +55,10 @@ def main():
         run([sys.executable, 'umap_plots.py', session, *plot_flags])
         print('distance_on_maze.py')
         run([sys.executable, 'distance_on_maze.py', session, *plot_flags])
+        print('graph_occupancy.py')
+        run([sys.executable, 'graph_occupancy.py', session, *plot_flags])
+        print('jumps_on_graph.py')
+        run([sys.executable, 'jumps_on_graph.py', session, *plot_flags])
         print('patch_umaps.py')
         run([sys.executable, 'patch_umaps.py', session, *plot_flags])
         print('alternate_embeddings.py')
