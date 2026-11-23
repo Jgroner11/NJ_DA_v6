@@ -27,7 +27,9 @@ Writes figures/<session>/graph/time_at_location.html, with a PNG beside it.
     python graph_occupancy.py                               # May 17
     python graph_occupancy.py reduced_np_data_25_05_2026
 
-Run from the project root, after export_bins.m (binned.mat must hold trial_number).
+Run from the project root, after export_bins.m (binned_100ms.mat must hold
+trial_number). Time at each location does not depend on the bin size, so this
+plot has none in its name.
 """
 
 import argparse
@@ -39,12 +41,12 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from PIL import Image
-from plotly.colors import sample_colorscale, unlabel_rgb
+from plotly.colors import sample_colorscale
 from scipy import ndimage
 from scipy.io import loadmat
 
-from distance_on_maze import MAZE_PNGS
-from umap_plots import BACKGROUND, TEXT_COLOUR, save
+from distance_on_maze import MAZE_PNGS, frame_slider
+from umap_plots import BACKGROUND, BIN_SIZES, TEXT_COLOUR, binned_path, save
 
 SESSION = 'reduced_np_data_17_05_2026'      # the default, as in umap_plots.py
 
@@ -60,9 +62,11 @@ MIN_LIKELIHOOD = 0.9         # as in export_bins.m
 
 MASK_RADIUS = 6              # px, the disc each frame stamps; corridors are ~40 px wide
 MIN_FRAMES = 3               # a pixel needs this many frames' discs over it to be assigned
+KEEP_LARGEST_PATCH = False   # True keeps only each location's largest connected patch (temporarily off)
 
 COLOUR_SCALE = 'Viridis'
 MASK_OPACITY = 0.8           # how strongly the colour covers the maze image
+HOVER_STEP = 4               # px, the size of the blocks the hover text is given for
 
 # DataJoint fetches are cached here, one pickle per session and table, as
 # umap_plots.py caches its fits; delete .cache/navigraph_* to fetch afresh
@@ -104,7 +108,8 @@ def frame_rate_for(session):
 
 def selected_trials(session):
     """The trial numbers export_bins.m kept for the session."""
-    binned = loadmat(Path('data') / session / 'binned.mat', variable_names=['trial_number'])
+    # every bin size's export selects the same trials
+    binned = loadmat(binned_path(session, BIN_SIZES[0]), variable_names=['trial_number'])
     return binned['trial_number'].ravel()
 
 
@@ -157,17 +162,16 @@ def labelled_positions(visits, session):
 
 def session_mask(session):
     """Everything needed to paint the session's maze: the image, the mask, its
-    locations, each location's median head position, and the visits and frame rate."""
+    locations, and the visits and frame rate."""
     frame_rate = frame_rate_for(session)
 
     visits = load_visits(session)
     frames = labelled_positions(visits, session)
-    centres = frames.groupby(['location_type', 'location_label'])[['traj_x', 'traj_y']].median()
 
     maze = np.asarray(Image.open(Path('data') / 'raw' / MAZE_PNGS[session]).convert('RGB'))
     height, width = maze.shape[:2]
     mask, locations = build_mask(frames, width, height)
-    return maze, mask, locations, centres, visits, frame_rate
+    return maze, mask, locations, visits, frame_rate
 
 
 def build_mask(frames, width, height):
@@ -207,6 +211,9 @@ def build_mask(frames, width, height):
 
     mask[best_count < MIN_FRAMES] = -1
 
+    if not KEEP_LARGEST_PATCH:
+        return mask, locations
+
     # keep each location's largest connected patch; the rest are strays
     for index in range(len(locations)):
         patches, n_patches = ndimage.label(mask == index)
@@ -216,71 +223,101 @@ def build_mask(frames, width, height):
     return mask, locations
 
 
-def mask_figure(maze, mask, locations, values, centres, title, colourbar_title,
-                hover_format, log_scale=False, colour_scale=COLOUR_SCALE):
+def mask_figure(maze, mask, locations, steps, colourbar_title, hover_value,
+                log_scale=False, colour_scale=COLOUR_SCALE, slider_prefix='', active=0):
     """The maze image with each location's area of the mask coloured by its value.
 
-    values is a Series indexed by (location_type, location_label); locations
-    missing from it are left unpainted. hover_format formats one value for the
-    hover text, e.g. '{:.1f} s'.
+    steps is a list of (name, title, values), values a Series indexed by
+    (location_type, location_label); locations missing from it are left
+    unpainted. One step gives a plain figure; more add a slider over them,
+    opening at steps[active]. hover_value is the hover's Plotly template for a
+    value, e.g. '%{z:.1f} s'.
+
+    Returns the figure and the extra height its slider needs, if any.
     """
     height, width = maze.shape[:2]
-    painted_locations = [location for location in locations if location in values.index]
-    raw = np.array([values[location] for location in painted_locations], float)
-    shown = np.log10(raw) if log_scale else raw
-    low, high = shown.min(), shown.max()
-    if high == low:
-        high = low + 1
+    n_locations = len(locations)
 
-    # each location's colour, then painted over its pixels of the maze image;
-    # locations without a value get index -1 and stay as the image
-    colours = np.array([unlabel_rgb(c) for c in
-                        sample_colorscale(colour_scale, list((shown - low) / (high - low)))])
-    colour_index = np.array([painted_locations.index(location) if location in values.index else -1
-                             for location in locations])
-    pixel_colour = np.where(mask >= 0, colour_index[mask], -1)
-    painted = maze.astype(float)
-    covered = pixel_colour >= 0
-    painted[covered] = ((1 - MASK_OPACITY) * painted[covered]
-                        + MASK_OPACITY * colours[pixel_colour[covered]])
+    # the hover's cells: one per HOVER_STEP x HOVER_STEP block, sampled at its
+    # centre pixel -- every pixel at full resolution would put over a million
+    # values in the HTML for every step; -1 indexes the trailing ''
+    centre = HOVER_STEP // 2
+    sampled = mask[centre::HOVER_STEP, centre::HOVER_STEP]
+    cell_text = np.array([f'{kind} {label}' for kind, label in locations] + [''], dtype=object)[sampled]
 
-    figure = go.Figure(go.Image(z=painted.astype(np.uint8), hoverinfo='skip'))
+    def step_traces(values):
+        """The three traces' data that change between steps: the paint's colour
+        scale, the hover's values and the colour bar."""
+        raw = np.array([values.get(location, np.nan) for location in locations], float)
+        shown = np.log10(raw) if log_scale else raw
+        low, high = np.nanmin(shown), np.nanmax(shown)
+        if high == low:
+            high = low + 1
+        colours = sample_colorscale(colour_scale, list(np.nan_to_num((shown - low) / (high - low))))
 
-    # invisible points at each location's median position, carrying its hover
-    # text and, through their colours, the colour bar
-    colourbar = dict(title=dict(text=colourbar_title, side='right'),
-                     outlinewidth=0, thickness=14, len=0.7)
-    if log_scale:
-        ticks = [t for t in [0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000, 3000]
-                 if low <= np.log10(t) <= high]
-        colourbar.update(tickvals=np.log10(ticks), ticktext=[f'{t:g}' for t in ticks])
-    figure.add_trace(go.Scattergl(
-        x=[centres.loc[location, 'traj_x'] for location in painted_locations],
-        y=[centres.loc[location, 'traj_y'] for location in painted_locations],
-        mode='markers', showlegend=False,
-        marker=dict(size=12, opacity=0, color=shown, colorscale=colour_scale,
-                    cmin=low, cmax=high, colorbar=colourbar),
-        text=[f'{kind} {label}: {hover_format.format(value)}'
-              for (kind, label), value in zip(painted_locations, raw)],
-        hovertemplate='%{text}<extra></extra>',
-    ))
+        # the paint shows location index + 1, 0 for none: a colour scale with a
+        # flat band per index colours each location, and leaves none and the
+        # locations without a value transparent
+        band_colours = ['rgba(0,0,0,0)'] + [colour if not np.isnan(value) else 'rgba(0,0,0,0)'
+                                            for colour, value in zip(colours, raw)]
+        bands = []
+        for index, colour in enumerate(band_colours):
+            bands += [[index / (n_locations + 1), colour], [(index + 1) / (n_locations + 1), colour]]
+        paint = go.Heatmap(colorscale=bands)
+
+        hover = go.Heatmap(z=np.append(raw, np.nan)[sampled].astype(np.float32))
+
+        colourbar = dict(title=dict(text=colourbar_title, side='right'),
+                         outlinewidth=0, thickness=14, len=0.7)
+        if log_scale:
+            ticks = [t for t in [0.1, 0.3, 1, 3, 10, 30, 100, 300, 1000, 3000]
+                     if low <= np.log10(t) <= high]
+            colourbar.update(tickvals=np.log10(ticks), ticktext=[f'{t:g}' for t in ticks])
+        bar = go.Scatter(marker=dict(color=[low, high], cmin=low, cmax=high, colorscale=colour_scale,
+                                     size=1, opacity=0, colorbar=colourbar))
+        return paint, hover, bar
+
+    paint, hover, bar = step_traces(steps[active][2])
+
+    # the plain maze image, the paint over it, the hover over that, and two
+    # invisible points carrying the colour bar
+    paint.update(z=(mask + 1).astype(np.int16), zmin=-0.5, zmax=n_locations + 0.5,
+                 opacity=MASK_OPACITY, showscale=False, hoverinfo='skip')
+    hover.update(text=cell_text, x0=centre, dx=HOVER_STEP, y0=centre, dy=HOVER_STEP,
+                 colorscale=[[0, 'rgba(0,0,0,0)'], [1, 'rgba(0,0,0,0)']], showscale=False,
+                 hoverongaps=False, hovertemplate=f'%{{text}}: {hover_value}<extra></extra>')
+    bar.update(x=[0, 0], y=[0, 0], mode='markers', showlegend=False, hoverinfo='skip')
+    figure = go.Figure([go.Image(z=maze, hoverinfo='skip'), paint, hover, bar])
+
+    def title(text):
+        return dict(text=text, x=0.02, xanchor='left')
 
     # go.Image puts the origin at the top left with y running down, as in the
     # video, so the tracking pixels land on the image without flipping
     figure.update_xaxes(visible=False, range=[0, width])
     figure.update_yaxes(visible=False, range=[height, 0], scaleanchor='x')
     figure.update_layout(
-        title=dict(text=title, x=0.02, xanchor='left'),
+        title=title(steps[active][1]),
         margin=dict(l=0, r=0, t=40, b=0),
         paper_bgcolor=BACKGROUND, plot_bgcolor=BACKGROUND,
         font=dict(color=TEXT_COLOUR),
     )
-    return figure
+    if len(steps) == 1:
+        return figure, 0
+
+    # each step a frame changing the paint's colours, the hover's values, the
+    # colour bar and the title
+    figure.frames = [go.Frame(name=name, data=list(step_traces(values)), traces=[1, 2, 3],
+                              layout=dict(title=title(step_title)))
+                     for name, step_title, values in steps]
+    figure.update_layout(sliders=[frame_slider([name for name, _, _ in steps], active, slider_prefix)],
+                         margin=dict(b=110))
+    return figure, 110
 
 
 def plot_session(session=SESSION, skip_created=False):
     """Measure the session's time and area at each location and write its maze plot."""
-    maze, mask, locations, centres, visits, frame_rate = session_mask(session)
+    maze, mask, locations, visits, frame_rate = session_mask(session)
     height, width = maze.shape[:2]
     seconds = time_at_locations(visits, frame_rate)
 
@@ -292,8 +329,8 @@ def plot_session(session=SESSION, skip_created=False):
 
     title = (f'{session}: time at each graph node and edge, over the area the head '
              f'covered there ({MASK_RADIUS} px discs, at least {MIN_FRAMES} frames)')
-    figure = mask_figure(maze, mask, locations, seconds, centres, title,
-                         'seconds spent', '{:.1f} s', log_scale=True)
+    figure, _ = mask_figure(maze, mask, locations, [('', title, seconds)],
+                            'seconds spent', '%{z:.1f} s', log_scale=True)
     out = Path('figures') / session / 'graph' / 'time_at_location.html'
     out.parent.mkdir(parents=True, exist_ok=True)
     save(figure, out, width + 120, height + 40, skip_created)

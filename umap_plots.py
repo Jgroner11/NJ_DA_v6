@@ -1,8 +1,10 @@
 """A 3D UMAP of every bin in one session, plotted under each labeling.
 
-Reads data/<session>/binned.mat, written by export_bins.m, fits one UMAP on
-every bin, and writes one interactive plot per labeling, each with a PNG of
-its starting view beside it, into two folders under figures/<session>/:
+Reads data/<session>/binned_<N>ms.mat, written by export_bins.m, fits one UMAP
+on every bin, and writes one interactive plot per labeling, each with a PNG of
+its starting view beside it, into two folders under figures/<session>/. Every
+file name ends in the bin size, e.g. umap_port_100ms.html; --bin_ms picks it
+(100 by default, or 10):
 
     whole_trial/   the trial labels (reward cycle, correctness, valuable patch,
                    specific valuable patch) on every bin of the trial
@@ -50,6 +52,7 @@ Run from the project root, after export_bins.m:
     python umap_plots.py
     python umap_plots.py reduced_np_data_25_05_2026
     python umap_plots.py reduced_np_data_25_05_2026 --skip_created
+    python umap_plots.py reduced_np_data_25_05_2026 --bin_ms 10
 
 --skip_created leaves any figure whose HTML and PNG both already exist as it
 is, so only new or missing plots are written.
@@ -74,6 +77,21 @@ from scipy.io import loadmat
 
 SESSION = 'reduced_np_data_17_05_2026'      # the .mat file's stem, as export_bins.m names it
 CACHE_DIR = Path('.cache')
+
+# the bin sizes, in ms, each session is exported and plotted at; the first is
+# every script's default
+BIN_SIZES = [100, 10]
+
+
+def binned_path(session, bin_ms):
+    """The session's export at bin_ms ms bins, as export_bins.m names it."""
+    return Path('data') / session / f'binned_{bin_ms}ms.mat'
+
+
+def add_bin_argument(parser):
+    """The --bin_ms option every plotting script takes."""
+    parser.add_argument('--bin_ms', type=int, default=BIN_SIZES[0], choices=BIN_SIZES,
+                        help='the bin size to plot, in ms; each figure name ends in it')
 
 UMAP_PARAMS = dict(n_neighbors=40, n_components=3, min_dist=0.1,
                    metric='correlation', n_jobs=-1)
@@ -298,12 +316,14 @@ def main():
                         help="the session's .mat file stem, as export_bins.m names it")
     parser.add_argument('--skip_created', action='store_true',
                         help='leave figures whose HTML and PNG both already exist untouched')
+    add_bin_argument(parser)
     args = parser.parse_args()
     session = args.session
-    binned_path = Path('data') / session / 'binned.mat'
-    if not binned_path.exists():
-        raise SystemExit(f'{binned_path} not found, run export_bins.m first')
-    binned = loadmat(binned_path)
+    bin_ms = args.bin_ms
+    path = binned_path(session, bin_ms)
+    if not path.exists():
+        raise SystemExit(f'{path} not found, run export_bins.m first')
+    binned = loadmat(path)
     spikes = binned['spikes'].T                         # bins x units
     minutes = binned['bin_times_sec'].ravel() / 60
     ports = binned['port_per_bin'].ravel().astype(int)
@@ -356,11 +376,11 @@ def main():
         out_dir.mkdir(parents=True, exist_ok=True)
         for name, (label, figure) in labelings.items():
             apply_layout(figure, f'{session}: full UMAP by {label} ({settings})')
-            save(figure, out_dir / f'umap_{name}.html', PNG_WIDTH, PNG_HEIGHT, args.skip_created)
+            save(figure, out_dir / f'umap_{name}_{bin_ms}ms.html', PNG_WIDTH, PNG_HEIGHT, args.skip_created)
 
         combined = combined_figure(
             labelings, f'{session}: full UMAP by every labeling, trial labels {scope} ({settings})')
-        save(combined, out_dir / 'umap_all.html', COMBINED_WIDTH, COMBINED_HEIGHT,
+        save(combined, out_dir / f'umap_all_{bin_ms}ms.html', COMBINED_WIDTH, COMBINED_HEIGHT,
              args.skip_created)
 
     # one plot per window, coloured only on the bins that far from their own
@@ -379,14 +399,14 @@ def main():
             'or no previous trial')
         apply_layout(figure, f'{session}: full UMAP by reward transition, '
                              f'{start:g} to {end:g} s of reward ({settings})')
-        save(figure, out_dir / f'umap_transition_{start:g}_{end:g}.html',
+        save(figure, out_dir / f'umap_transition_{start:g}_{end:g}_{bin_ms}ms.html',
              PNG_WIDTH, PNG_HEIGHT, args.skip_created)
         windows[f'{start:g}_{end:g}'] = (f'{start:g} to {end:g} s of reward', figure)
 
     combined = combined_figure(
         windows, f'{session}: full UMAP by reward transition, by window ({settings})',
         cols=len(windows))
-    save(combined, out_dir / 'umap_transition_all.html',
+    save(combined, out_dir / f'umap_transition_all_{bin_ms}ms.html',
          TRANSITION_COMBINED_WIDTH, TRANSITION_COMBINED_HEIGHT, args.skip_created)
 
 

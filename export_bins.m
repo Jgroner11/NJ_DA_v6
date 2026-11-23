@@ -4,15 +4,18 @@
 % position and port each bin is at, whether that is its own trial's port, and
 % its trial's reward, correctness, valuable patch, specific valuable patch and
 % reward transition labels, plus each trial's number, start and duration, to
-% data/<session>/binned.mat -- the only file the Python side reads.
+% data/<session>/binned_<bin_size_ms>ms.mat -- the only file the Python side reads.
 % Run from the project root.
 
 % pipeline.py sets data_file before running this; run by hand, it is this one
 if ~exist('data_file', 'var')
     data_file = 'reduced_np_data_17_05_2026.mat';
 end
-bin_size_ms = 100;
-sigma_bins = 2;            % Gaussian width in bins
+% pipeline.py sets bin_size_ms too, once per bin size it exports
+if ~exist('bin_size_ms', 'var')
+    bin_size_ms = 100;
+end
+sigma_bins = 2;            % Gaussian width in bins, whatever their size
 
 %% Load
 [~, session] = fileparts(data_file);
@@ -323,5 +326,5 @@ if ~isfolder(out_dir)
     mkdir(out_dir);
 end
 % -v7 rather than -v7.3 so scipy.io.loadmat can read it
-save(fullfile(out_dir, 'binned.mat'), 'spikes', 'unit_ids', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_since_discovery_per_bin', ...
+save(fullfile(out_dir, sprintf('binned_%dms.mat', bin_size_ms)), 'spikes', 'unit_ids', 'bin_times_sec', 'head_x', 'head_y', 'port_per_bin', 'at_trial_port', 'reward_per_bin', 'correct_per_bin', 'valuable_per_bin', 'specific_per_bin', 'transition_per_bin', 'time_to_trial_reward', 'trial_patch_per_bin', 'trial_since_discovery_per_bin', ...
     'trial_number', 'trial_start_sec', 'trial_duration_sec', 'bin_size_ms', 'sigma_bins', '-v7');

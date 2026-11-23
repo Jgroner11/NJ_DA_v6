@@ -2,21 +2,24 @@
 
 A jump is a bin whose UMAP point lies MIN_DISTANCE or more from the next bin's,
 as in distance_on_maze.py. Each bin is placed at a node or edge by its time:
-bin_times_sec and the trial timing in binned.mat give its trial and its frame
+bin_times_sec and the trial timing in binned_<N>ms.mat give its trial and its frame
 in the trial (at the tracking's frame rate), and DataJoint's
 VideoGraphLocation gives the node or edge the mouse was at in that frame. The
 jumps are counted per node and edge and each one's area of the graph mask
 (built as in graph_occupancy.py) is painted with its count; visited nodes and
 edges with no jumps are painted at 0. A second figure divides each count by
 the time spent there, measured as the bins placed there times the bin length.
+Both HTML plots have a slider stepping the jump threshold through
+distance_on_maze.py's THRESHOLDS; they open, and their PNGs show, MIN_DISTANCE.
 
-Writes figures/<session>/jump_analysis/jumps_at_location.html and
-jump_rate_at_location.html, each with a PNG beside it.
+Writes figures/<session>/jump_analysis/jumps_at_location_<N>ms.html and
+jump_rate_at_location_<N>ms.html, each with a PNG beside it, N the bin size
+--bin_ms picks (100 by default, or 10).
 
     python jumps_on_graph.py                               # May 17
     python jumps_on_graph.py reduced_np_data_25_05_2026
 
-Run from the project root, after export_bins.m (binned.mat must hold
+Run from the project root, after export_bins.m (binned_<N>ms.mat must hold
 trial_number) and with a cached fit from umap_plots.py, or it fits one.
 """
 
@@ -27,17 +30,17 @@ import numpy as np
 import pandas as pd
 from scipy.io import loadmat
 
-from distance_on_maze import MIN_DISTANCE, compute_distances, load_embedding
+from distance_on_maze import MIN_DISTANCE, THRESHOLDS, compute_distances, load_embedding
 from graph_occupancy import MASK_RADIUS, MIN_FRAMES, mask_figure, session_mask, visit_frames
-from umap_plots import save
+from umap_plots import add_bin_argument, binned_path, save
 
 SESSION = 'reduced_np_data_17_05_2026'      # the default, as in umap_plots.py
 COLOUR_SCALE = 'Plasma'                      # as in distance_on_maze.py
 
 
-def bin_locations(session, visits, frame_rate):
+def bin_locations(session, visits, frame_rate, bin_ms=100):
     """Each bin's location type and label, NaN for bins outside a trial or a visit."""
-    binned = loadmat(Path('data') / session / 'binned.mat',
+    binned = loadmat(binned_path(session, bin_ms),
                      variable_names=['bin_times_sec', 'trial_number',
                                      'trial_start_sec', 'trial_duration_sec'])
     times = binned['bin_times_sec'].ravel()
@@ -63,51 +66,65 @@ def bin_locations(session, visits, frame_rate):
     return located.sort_values('bin').reset_index(drop=True)
 
 
-def plot_session(session=SESSION, skip_created=False):
+def plot_session(session=SESSION, skip_created=False, bin_ms=100):
     """Count the session's jumps at each node and edge and write its maze plot."""
-    maze, mask, locations, centres, visits, frame_rate = session_mask(session)
+    maze, mask, locations, visits, frame_rate = session_mask(session)
     height, width = maze.shape[:2]
 
-    distances = compute_distances(load_embedding(session))
-    located = bin_locations(session, visits, frame_rate).iloc[:-1]    # bin i for distance i
+    distances = compute_distances(load_embedding(session, bin_ms))
+    located = bin_locations(session, visits, frame_rate, bin_ms).iloc[:-1]    # bin i for distance i
+    index = pd.MultiIndex.from_tuples(locations)
+
+    def jump_counts(threshold):
+        """Jumps at or above threshold at every node and edge with area in the
+        mask, zero where none happened there."""
+        jumps = located[distances >= threshold].groupby(['location_type', 'location_label']).size()
+        return pd.Series([jumps.get(location, 0) for location in locations], index=index)
+
     is_jump = distances >= MIN_DISTANCE
-
-    jumps = located[is_jump].groupby(['location_type', 'location_label']).size()
-
-    # every node and edge with area in the mask, zero where no jump happened there
-    counts = pd.Series([jumps.get(location, 0) for location in locations],
-                       index=pd.MultiIndex.from_tuples(locations))
-
     kind = located['location_type']
-    print(f'{session}: {is_jump.sum()} jumps of {len(distances)} bins; '
+    print(f'{session}, {bin_ms} ms: {is_jump.sum()} jumps of {len(distances)} bins at {MIN_DISTANCE:g}; '
           f'{(is_jump & (kind == "node")).sum()} at nodes, '
           f'{(is_jump & (kind == "edge")).sum()} on edges, '
           f'{(is_jump & kind.isna()).sum()} outside a trial or visit; '
-          f'{(counts > 0).sum()} of {len(locations)} nodes and edges have one or more')
+          f'{(jump_counts(MIN_DISTANCE) > 0).sum()} of {len(locations)} nodes and edges have one or more')
 
-    title = (f'{session}: UMAP jumps (distance to next bin {MIN_DISTANCE:g} and above) at each '
-             f'graph node and edge, over the area the head covered there ({MASK_RADIUS} px discs, '
-             f'at least {MIN_FRAMES} frames)')
-    figure = mask_figure(maze, mask, locations, counts, centres, title,
-                         'jumps', '{:.0f} jumps', colour_scale=COLOUR_SCALE)
-    out_dir = Path('figures') / session / 'jump_analysis'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    save(figure, out_dir / 'jumps_at_location.html', width + 120, height + 40, skip_created)
-
-    # the same counts per second spent there; the time is the bins placed at each
-    # location times the bin length, so jumps and time come from the same bins
-    bin_seconds = loadmat(Path('data') / session / 'binned.mat',
+    # the time at each location is the bins placed there times the bin length,
+    # so jumps and time come from the same bins
+    bin_seconds = loadmat(binned_path(session, bin_ms),
                           variable_names=['bin_size_ms'])['bin_size_ms'].item() / 1000
     bins_at = located.groupby(['location_type', 'location_label']).size()
-    seconds = pd.Series([bins_at.get(location, 0) * bin_seconds for location in locations],
-                        index=counts.index)
-    rates = (counts / seconds)[seconds > 0]
+    seconds = pd.Series([bins_at.get(location, 0) * bin_seconds for location in locations], index=index)
 
-    title = (f'{session}: UMAP jumps per second spent at each graph node and edge '
-             f'(distance to next bin {MIN_DISTANCE:g} and above, {bin_seconds * 1000:g} ms bins)')
-    figure = mask_figure(maze, mask, locations, rates, centres, title,
-                         'jumps per second', '{:.2f} jumps/s', colour_scale=COLOUR_SCALE)
-    save(figure, out_dir / 'jump_rate_at_location.html', width + 120, height + 40, skip_created)
+    # one slider step per threshold, for the counts and for the counts per second
+    count_steps, rate_steps = [], []
+    for threshold in THRESHOLDS:
+        counts = jump_counts(threshold)
+        name = f'{threshold:g}'
+        count_steps.append((name, f'{session}: UMAP jumps ({bin_ms} ms bins, distance to next bin {threshold:g} and '
+                                  f'above, {counts.sum()} in all) at each graph node and edge, over '
+                                  f'the area the head covered there ({MASK_RADIUS} px discs, at '
+                                  f'least {MIN_FRAMES} frames)', counts))
+        rate_steps.append((name, f'{session}: UMAP jumps per second spent at each graph node and '
+                                 f'edge (distance to next bin {threshold:g} and above, '
+                                 f'{bin_seconds * 1000:g} ms bins)',
+                           (counts / seconds)[seconds > 0]))
+
+    active = THRESHOLDS.index(MIN_DISTANCE)
+    out_dir = Path('figures') / session / 'jump_analysis'
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    figure, slider_height = mask_figure(maze, mask, locations, count_steps, 'jumps', '%{z:.0f} jumps',
+                                        colour_scale=COLOUR_SCALE, slider_prefix='jump threshold: ',
+                                        active=active)
+    save(figure, out_dir / f'jumps_at_location_{bin_ms}ms.html', width + 120, height + 40 + slider_height,
+         skip_created)
+
+    figure, slider_height = mask_figure(maze, mask, locations, rate_steps, 'jumps per second',
+                                        '%{z:.2f} jumps/s', colour_scale=COLOUR_SCALE,
+                                        slider_prefix='jump threshold: ', active=active)
+    save(figure, out_dir / f'jump_rate_at_location_{bin_ms}ms.html', width + 120, height + 40 + slider_height,
+         skip_created)
 
 
 if __name__ == '__main__':
@@ -116,5 +133,6 @@ if __name__ == '__main__':
                         help="the session's .mat file stem, as export_bins.m names it")
     parser.add_argument('--skip_created', action='store_true',
                         help='leave the plot untouched if its HTML and PNG already exist')
+    add_bin_argument(parser)
     args = parser.parse_args()
-    plot_session(args.session, args.skip_created)
+    plot_session(args.session, args.skip_created, args.bin_ms)
